@@ -1,0 +1,111 @@
+name: k8s-smoke
+
+on:
+  pull_request:
+    paths:
+      - "examples/helm/**"
+      - "examples/server/**"
+      - "examples/load/**"
+      - ".github/workflows/k8s-smoke.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: k8s-smoke-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Setup Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "20"
+
+      - name: Setup Helm
+        uses: azure/setup-helm@bf6a7d304bc2fdb57e0331155b7ebf2c504acf0a # v4
+        with:
+          version: v3.16.2
+
+      - name: Setup kubectl
+        uses: azure/setup-kubectl@c0c8b32d33a5244f1e5947304550403b63930415 # v4
+        with:
+          version: v1.30.3
+
+      - name: Setup k6
+        uses: grafana/setup-k6-action@c00053c996b4061198c9c24a00474b748abdf8b7 # v1
+
+      - name: Build server image
+        run: docker build -t mcp-server:ci examples/server
+
+      - name: Create kind cluster
+        uses: helm/kind-action@0025e74a8c7512023d06dc019c617aa3cf561fde # v1.10.0
+        with:
+          cluster_name: mcp-smoke
+
+      - name: Load image into kind
+        run: kind load docker-image mcp-server:ci --name mcp-smoke
+
+      - name: Install ingress-nginx
+        run: |
+          kubectl apply -f https://kind.sigs.k8s.io/examples/ingress/deploy-ingress-nginx.yaml
+          kubectl wait \
+            --namespace ingress-nginx \
+            --for=condition=ready pod \
+            --selector=app.kubernetes.io/component=controller \
+            --timeout=180s
+
+      - name: Helm install chart
+        run: |
+          helm upgrade --install mcp examples/helm \
+            -n mcp-smoke --create-namespace \
+            --set image.repository=mcp-server \
+            --set image.tag=ci \
+            --set ingress.enabled=false \
+            --set autoscaling.enabled=false \
+            --set podDisruptionBudget.enabled=false \
+            --set networkPolicy.enabled=false \
+            --set observability.metrics.serviceMonitor.enabled=false \
+            --wait --timeout 4m
+
+      - name: Run smoke test
+        run: |
+          chmod +x examples/helm/smoke-test.sh
+          SKIP_KIND_CREATE=true \
+          NAMESPACE=mcp-smoke \
+          RELEASE=mcp \
+          IMAGE_REPOSITORY=mcp-server \
+          IMAGE_TAG=ci \
+          LOCAL_PORT=18080 \
+          examples/helm/smoke-test.sh
+
+      - name: Start port-forward for k6
+        run: |
+          svc="$(kubectl -n mcp-smoke get svc -l app.kubernetes.io/instance=mcp -o jsonpath='{.items[0].metadata.name}')"
+          kubectl -n mcp-smoke port-forward "svc/${svc}" 18080:80 >/tmp/mcp-k6-portforward.log 2>&1 &
+          echo $! >/tmp/mcp-k6-portforward.pid
+          sleep 3
+
+      - name: Run k6 thresholds
+        run: k6 run examples/load/k6-streamable.js -e BASE_URL=http://localhost:18080
+
+      - name: Stop k6 port-forward
+        if: always()
+        run: |
+          if [ -f /tmp/mcp-k6-portforward.pid ]; then
+            kill "$(cat /tmp/mcp-k6-portforward.pid)" || true
+          fi
+
+      - name: Dump cluster diagnostics on failure
+        if: failure()
+        run: |
+          kubectl get pods -A -o wide
+          kubectl -n mcp-smoke describe all
+          deploy="$(kubectl -n mcp-smoke get deploy -l app.kubernetes.io/instance=mcp -o jsonpath='{.items[0].metadata.name}')"
+          kubectl -n mcp-smoke logs "deploy/${deploy}" --all-containers=true || true

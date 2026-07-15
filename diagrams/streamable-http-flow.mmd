@@ -1,0 +1,10 @@
+%% Streamable HTTP request/response decision tree
+%% Source: docs/02-transport-architecture.md
+flowchart TD
+  Post["POST /mcp with JSON-RPC payload"] --> Type{"Payload type?"}
+  Type -->|"Notification or response"| A202["HTTP 202 Accepted, empty body"]
+  Type -->|"Request, simple"| Json["HTTP 200, Content-Type: application/json, single JSON-RPC response"]
+  Type -->|"Request, streaming"| Sse["HTTP 200, Content-Type: text/event-stream, SSE stream"]
+  Sse --> Sse1["Optional: server sends related requests/notifications first"]
+  Sse1 --> Sse2["Eventually: JSON-RPC response for the original request"]
+  Sse2 --> Close["Server SHOULD close the stream"]

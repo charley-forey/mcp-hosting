@@ -1,0 +1,9 @@
+# Social sharing and crawler-challenged links in scraped sources.
+https://www.facebook.com/*
+https://twitter.com/*
+http://twitter.com/*
+https://www.linkedin.com/*
+https://pinterest.com/*
+
+# GitHub fragment anchors in scraped pages can be unstable.
+https://github.com/*#*

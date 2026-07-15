@@ -1,0 +1,77 @@
+name: handbook-ci
+
+on:
+  pull_request:
+    paths:
+      - "docs/**"
+      - "sources/**"
+      - "diagrams/**"
+      - "scripts/**"
+      - "examples/helm/**"
+      - "*.md"
+      - "**/README.md"
+      - ".github/workflows/handbook-ci.yml"
+      - ".markdownlint.yaml"
+      - ".lycheeignore"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: handbook-ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  integrity:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Setup Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "20"
+
+      - name: Setup Helm
+        uses: azure/setup-helm@bf6a7d304bc2fdb57e0331155b7ebf2c504acf0a # v4
+        with:
+          version: v3.16.2
+
+      - name: Install kubeconform
+        run: |
+          set -euo pipefail
+          curl -sSL -o /tmp/kubeconform.tar.gz https://github.com/yannh/kubeconform/releases/download/v0.6.7/kubeconform-linux-amd64.tar.gz
+          tar -xzf /tmp/kubeconform.tar.gz -C /tmp
+          sudo mv /tmp/kubeconform /usr/local/bin/kubeconform
+
+      - name: Install markdown and mermaid tooling
+        run: npm install -g markdownlint-cli2 @mermaid-js/mermaid-cli
+
+      - name: Validate claim citations
+        shell: pwsh
+        run: ./scripts/validate-claims.ps1
+
+      - name: Markdown lint
+        run: markdownlint-cli2 "README.md" "CONTRIBUTING.md" "docs/**/*.md" "examples/**/*.md" "diagrams/**/*.md"
+
+      - name: Mermaid syntax check
+        run: |
+          set -euo pipefail
+          for file in diagrams/*.mmd; do
+            echo "Checking $file"
+            mmdc -i "$file" -o /tmp/diagram.svg -t neutral -b transparent
+          done
+
+      - name: Helm lint
+        run: helm lint examples/helm
+
+      - name: Helm template + kubeconform
+        run: helm template mcp examples/helm | kubeconform -strict -summary -output text
+
+      - name: Link check
+        uses: lycheeverse/lychee-action@8646ba30535128ac92d33dfc9133794bfdd9b411 # v2
+        with:
+          args: --no-progress --include-fragments --retry-wait-time 2 --max-retries 2 --exclude-mail --exclude-path .lycheeignore docs/ README.md CONTRIBUTING.md sources/_index.csv
+          fail: true

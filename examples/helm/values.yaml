@@ -1,0 +1,151 @@
+# Reference values for hosting a streamable HTTP MCP server on Kubernetes.
+# This file is intentionally well-commented so it doubles as documentation.
+# See docs/04-kubernetes-deep-dive.md for the rationale behind every setting.
+
+replicaCount: 3
+
+image:
+  repository: ghcr.io/your-org/your-mcp
+  tag: "0.1.0"
+  pullPolicy: IfNotPresent
+
+# imagePullSecrets is a list of secret names; create with:
+#   kubectl create secret docker-registry ghcr-pull --docker-server=ghcr.io ...
+imagePullSecrets: []
+
+nameOverride: ""
+fullnameOverride: ""
+
+serviceAccount:
+  create: true
+  annotations: {}
+  name: ""
+
+# Pod-level security context (run as non-root, drop all capabilities).
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 10001
+  fsGroup: 10001
+  seccompProfile:
+    type: RuntimeDefault
+
+# Container security context.
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  runAsNonRoot: true
+  capabilities:
+    drop: [ALL]
+
+service:
+  type: ClusterIP
+  port: 80
+  targetPort: 8080
+
+ingress:
+  enabled: true
+  className: nginx
+  hosts:
+    - host: mcp.example.com
+      paths:
+        - path: /mcp
+          pathType: Prefix
+  tls:
+    - secretName: mcp-tls
+      hosts:
+        - mcp.example.com
+  annotations:
+    # Streaming-safe defaults for ingress-nginx. Without these, SSE
+    # responses hang in the buffer and clients see frozen connections.
+    # See docs/04-kubernetes-deep-dive.md#ingress-getting-streaming-right
+    nginx.ingress.kubernetes.io/proxy-buffering: "off"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-http-version: "1.1"
+    nginx.ingress.kubernetes.io/upstream-keepalive-timeout: "3600"
+    nginx.ingress.kubernetes.io/configuration-snippet: |
+      more_set_headers "Strict-Transport-Security: max-age=31536000; includeSubDomains";
+      more_set_headers "X-Content-Type-Options: nosniff";
+      more_set_headers "X-Frame-Options: DENY";
+
+resources:
+  # Right-size with real load tests. These defaults match published guidance
+  # for community Helm charts and have been validated for low-to-moderate
+  # traffic internal MCPs.
+  requests:
+    cpu: 500m
+    memory: 512Mi
+  limits:
+    cpu: "2"
+    memory: 2Gi
+
+# Liveness should be cheap and dependency-free.
+# Readiness should include downstream dependencies.
+probes:
+  liveness:
+    httpGet:
+      path: /healthz
+      port: 8080
+    initialDelaySeconds: 10
+    periodSeconds: 10
+    timeoutSeconds: 2
+    failureThreshold: 3
+  readiness:
+    httpGet:
+      path: /readyz
+      port: 8080
+    initialDelaySeconds: 5
+    periodSeconds: 5
+    timeoutSeconds: 2
+    failureThreshold: 3
+
+# Give in-flight SSE streams time to drain on pod termination.
+terminationGracePeriodSeconds: 60
+
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 75
+
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 2
+
+networkPolicy:
+  enabled: true
+  # Replace these with the actual labels of your ingress controller namespace.
+  ingressFromNamespaceLabel:
+    kubernetes.io/metadata.name: ingress-nginx
+
+# MCP-specific configuration.
+mcp:
+  # The endpoint path the server exposes. Convention: /mcp.
+  endpointPath: /mcp
+  # Origin allowlist for DNS rebinding protection.
+  allowedOrigins:
+    - https://chat.example.com
+  # OAuth 2.1 issuer metadata. See docs/06-security.md.
+  oauth:
+    enabled: false
+    issuer: ""
+    audience: "https://mcp.example.com/mcp"
+    requiredScopes: []
+
+# Optional Redis for stateful sessions. Default off (stateless MCP).
+# See docs/05-sessions-and-state.md for guidance on when to enable.
+redis:
+  enabled: false
+  # When enabled, the chart expects credentials to be provided via External
+  # Secrets Operator or Vault Agent injector at /var/run/secrets/redis.
+  url: ""
+
+# Observability hooks.
+observability:
+  otel:
+    enabled: true
+    exporterEndpoint: "http://otel-collector.observability.svc.cluster.local:4318"
+  metrics:
+    serviceMonitor:
+      enabled: true
+      interval: 30s

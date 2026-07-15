@@ -1,0 +1,26 @@
+version: 2
+
+updates:
+  # Keep pinned GitHub Actions SHAs current.
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+    open-pull-requests-limit: 10
+    commit-message:
+      prefix: "ci"
+      include: "scope"
+
+  # Keep the executable reference server dependencies updated.
+  - package-ecosystem: "npm"
+    directory: "/examples/server"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:15"
+    open-pull-requests-limit: 10
+    commit-message:
+      prefix: "deps"
+      include: "scope"

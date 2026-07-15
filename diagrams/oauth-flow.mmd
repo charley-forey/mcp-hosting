@@ -1,0 +1,25 @@
+%% OAuth 2.1 + RFC 8707 resource indicator flow for MCP authorization
+%% Source: docs/06-security.md
+sequenceDiagram
+  participant U as User-Agent (browser)
+  participant C as MCP Client
+  participant S as MCP Server
+  participant AS as Authorization Server (OAuth 2.1)
+
+  C->>S: POST /mcp initialize (no token)
+  S-->>C: 401 Unauthorized<br/>WWW-Authenticate: Bearer realm,<br/>resource_metadata=https://mcp/.well-known/oauth-protected-resource
+  C->>S: GET /.well-known/oauth-protected-resource
+  S-->>C: { authorization_servers: [AS], resource: "https://mcp.example.com/mcp" }
+  C->>AS: GET /.well-known/oauth-authorization-server (RFC 8414)
+  AS-->>C: metadata { authorization_endpoint, token_endpoint, ... }
+
+  C->>U: redirect to AS authorization_endpoint?<br/>resource=https://mcp.example.com/mcp&...
+  U->>AS: user authenticates and consents
+  AS-->>U: redirect back with authorization code
+
+  C->>AS: POST /token (code, PKCE verifier,<br/>resource=https://mcp.example.com/mcp)
+  AS-->>C: access_token (audience-bound to MCP)
+
+  C->>S: POST /mcp tools/call<br/>Authorization: Bearer access_token
+  S->>S: validate token signature, audience, scopes
+  S-->>C: 200 application/json or text/event-stream

@@ -1,0 +1,30 @@
+%% Reference Kubernetes topology for a streamable HTTP MCP server
+%% Source: docs/04-kubernetes-deep-dive.md
+flowchart LR
+  subgraph internet[Internet or VPC]
+    Client[MCP Client]
+  end
+
+  subgraph cluster[Kubernetes Cluster]
+    Ingress["ingress-nginx<br/>SSE pass-through"]
+    Service[Service ClusterIP]
+    subgraph pods[Deployment + HPA]
+      P1[Pod replica 1]
+      P2[Pod replica 2]
+      P3[Pod replica N]
+    end
+    Redis[(Redis<br/>optional, for sessions)]
+    Secrets[(External Secrets<br/>Vault / cloud KMS)]
+  end
+
+  Client -->|"HTTPS POST /mcp<br/>Mcp-Method, Mcp-Name"| Ingress
+  Ingress -->|"L7 route by header"| Service
+  Service --> P1
+  Service --> P2
+  Service --> P3
+  P1 -.-> Redis
+  P2 -.-> Redis
+  P3 -.-> Redis
+  P1 -.-> Secrets
+  P2 -.-> Secrets
+  P3 -.-> Secrets

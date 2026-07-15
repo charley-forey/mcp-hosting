@@ -1,0 +1,14 @@
+%% Source ingestion and validation pipeline for the handbook
+%% Source: README.md and CONTRIBUTING.md
+flowchart LR
+  Web[Curated URLs] --> Fetch[fetch-source.ps1]
+  Fetch --> Pages[sources/pages/*.md]
+  Fetch --> Index[sources/_index.csv]
+  Pages --> Synth[Author docs/*.md with citation tags]
+  Index --> Validate[validate-claims.ps1]
+  Synth --> Validate
+  Synth --> Diagrams[diagrams/*.mmd]
+  Examples[examples/helm + k8s] --> LocalK8s[kind/minikube smoke test]
+  LocalK8s --> Synth
+  Validate --> Handbook[Internal handbook]
+  Diagrams --> Handbook

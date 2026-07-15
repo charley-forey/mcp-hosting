@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "mcp.fullname" . }}-config
+  labels: {{- include "mcp.labels" . | nindent 4 }}
+data:
+  endpoint_path: {{ .Values.mcp.endpointPath | quote }}
+  allowed_origins: {{ join "," .Values.mcp.allowedOrigins | quote }}
+  oauth_enabled: {{ .Values.mcp.oauth.enabled | quote }}
+  oauth_audience: {{ .Values.mcp.oauth.audience | quote }}
+  redis_enabled: {{ .Values.redis.enabled | quote }}
+  otel_enabled: {{ .Values.observability.otel.enabled | quote }}

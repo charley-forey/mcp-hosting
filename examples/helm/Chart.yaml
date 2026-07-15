@@ -1,0 +1,15 @@
+apiVersion: v2
+name: mcp-server
+description: Reference Helm chart for hosting a streamable HTTP MCP server.
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+keywords:
+  - mcp
+  - model-context-protocol
+  - streamable-http
+home: https://github.com/your-org/mcp-hosting
+maintainers:
+  - name: Internal Platform Team
+sources:
+  - https://github.com/your-org/mcp-hosting

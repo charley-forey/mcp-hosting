@@ -1,0 +1,77 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "mcp.fullname" . }}
+  labels: {{- include "mcp.labels" . | nindent 4 }}
+spec:
+  {{- if not .Values.autoscaling.enabled }}
+  replicas: {{ .Values.replicaCount }}
+  {{- end }}
+  selector:
+    matchLabels: {{- include "mcp.selectorLabels" . | nindent 6 }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels: {{- include "mcp.selectorLabels" . | nindent 8 }}
+      annotations:
+        # Force a rollout when ConfigMap changes (typical helm pattern).
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+    spec:
+      serviceAccountName: {{ include "mcp.serviceAccountName" . }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext: {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      terminationGracePeriodSeconds: {{ .Values.terminationGracePeriodSeconds }}
+      containers:
+        - name: mcp
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext: {{- toYaml .Values.securityContext | nindent 12 }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.service.targetPort }}
+              protocol: TCP
+          env:
+            - name: MCP_ENDPOINT_PATH
+              value: {{ .Values.mcp.endpointPath | quote }}
+            - name: MCP_ALLOWED_ORIGINS
+              value: {{ join "," .Values.mcp.allowedOrigins | quote }}
+            {{- if .Values.mcp.oauth.enabled }}
+            - name: MCP_OAUTH_ISSUER
+              value: {{ .Values.mcp.oauth.issuer | quote }}
+            - name: MCP_OAUTH_AUDIENCE
+              value: {{ .Values.mcp.oauth.audience | quote }}
+            - name: MCP_OAUTH_REQUIRED_SCOPES
+              value: {{ join "," .Values.mcp.oauth.requiredScopes | quote }}
+            {{- end }}
+            {{- if .Values.redis.enabled }}
+            - name: MCP_REDIS_URL
+              value: {{ .Values.redis.url | quote }}
+            {{- end }}
+            {{- if .Values.observability.otel.enabled }}
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: {{ .Values.observability.otel.exporterEndpoint | quote }}
+            - name: OTEL_SERVICE_NAME
+              value: {{ include "mcp.fullname" . | quote }}
+            {{- end }}
+          livenessProbe: {{- toYaml .Values.probes.liveness | nindent 12 }}
+          readinessProbe: {{- toYaml .Values.probes.readiness | nindent 12 }}
+          resources: {{- toYaml .Values.resources | nindent 12 }}
+          lifecycle:
+            preStop:
+              # Give in-flight SSE streams time to drain. The MCP server
+              # should stop accepting new connections on SIGTERM and finish
+              # responding to existing streams before exiting.
+              exec:
+                command: ["/bin/sh", "-c", "sleep 15"]
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}

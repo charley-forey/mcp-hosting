@@ -1,0 +1,13 @@
+%% Session-strategy decision tree
+%% Source: docs/05-sessions-and-state.md
+flowchart LR
+  A["New MCP"] --> B{"Pure stateless tools?"}
+  B -->|"Yes"| Stateless["Don't issue Mcp-Session-Id"]
+  B -->|"No"| C{"Need revocation < 1 min?"}
+  C -->|"No"| JWT["JWT session, 30 min TTL"]
+  C -->|"Yes"| Redis["Redis session store"]
+  Redis --> D{"Need SSE resumability?"}
+  D -->|"Yes"| RedisBuf["Add Redis replay buffer<br/>per (session, stream)"]
+  D -->|"No"| RedisDone["Done"]
+  JWT --> JWTDone["Done"]
+  Stateless --> StatelessDone["Done"]
